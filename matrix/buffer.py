@@ -50,12 +50,16 @@ from nio import (
     FullyReadEvent,
     BadEvent,
     UnknownBadEvent,
+    CallInviteEvent,
+    CallCandidatesEvent,
+    CallAnswerEvent,
+    CallHangupEvent
 )
 
 from . import globals as G
 from .colors import Formatted
 from .config import RedactType
-from .globals import SCRIPT_NAME, SERVERS, W, TYPING_NOTICE_TIMEOUT
+from .globals import SCRIPT_NAME, SERVERS, W, TYPING_NOTICE_TIMEOUT, CALLS
 from .utf import utf8_decode
 from .message_renderer import Render
 from .utils import (
@@ -64,6 +68,7 @@ from .utils import (
     string_strikethrough,
     color_pair,
 )
+from .calls import CallProcess, find_call
 
 
 @attr.s
@@ -1509,6 +1514,32 @@ class RoomBuffer(object):
 
         elif isinstance(event, MegolmEvent):
             self.print_megolm(event, extra_tags)
+
+        elif isinstance(event, CallInviteEvent):
+            if not event.expired:
+                CALLS[event.call_id] = CallProcess(
+                    self.server_name,
+                    self.room.room_id,
+                    event.call_id,
+                    event.version,
+                    event.offer
+                )
+
+        elif isinstance(event, CallCandidatesEvent):
+            call = find_call(event.call_id)
+            if call:
+                for candidate in event.candidates:
+                    call.add_candidate(candidate)
+
+        elif isinstance(event, CallHangupEvent):
+            try:
+                call = CALLS.pop(event.call_id)
+                call.hangup()
+            except KeyError:
+                pass
+
+        elif isinstance(event, CallAnswerEvent):
+            pass
 
         elif isinstance(event, UnknownEvent):
             pass

@@ -32,6 +32,7 @@ if os.path.exists(activate_this):
 import socket
 import ssl
 import textwrap
+import json
 # pylint: disable=redefined-builtin
 from builtins import str
 from itertools import chain
@@ -97,6 +98,7 @@ from matrix.utf import utf8_decode
 from matrix.utils import server_buffer_prnt, server_buffer_set_title
 
 from matrix.uploads import UploadsBuffer, upload_cb
+from matrix.calls import webrtc_cb
 
 try:
     from urllib.parse import urlunparse
@@ -113,6 +115,9 @@ WEECHAT_SCRIPT_LICENSE = "ISC"                                 # type: str
 
 
 logger = Logger("matrix-cli")
+
+CALL_BUFFER = ""
+WEBRTC_HOOK = None
 
 
 def print_certificate_info(buff, sock, cert):
