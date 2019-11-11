@@ -140,6 +140,8 @@ class WebRTCClient(Gtk.Box):
         self.pipe = Gst.parse_launch(PIPELINE_DESC)
 
         self.webrtc = self.pipe.get_by_name('sendrecv')
+        import sys
+        print('webrtc of type', type(self.webrtc), file=sys.stderr)
         self.webrtc.connect('on-negotiation-needed', self.on_negotiation_needed)
         self.webrtc.connect('on-ice-candidate', self.send_ice_candidate_message)
         self.webrtc.connect('pad-added', self.on_incoming_stream)
@@ -161,9 +163,20 @@ class WebRTCClient(Gtk.Box):
         loop.run_until_complete(self.signaling.send(offer))
 
     def on_offer_created(self, promise, _, __):
-        promise.wait()
+        if promise.wait() != Gst.PromiseResult.REPLIED:
+            import sys
+            print("offer_created no reply", file=sys.stderr)
+            return
+
         reply = promise.get_reply()
-        offer = reply['offer']
+        if reply is None:
+            import sys
+            print("offer_created none reply", file=sys.stderr)
+            return
+
+        offer = reply.get_value('offer')
+        import sys
+        print("offer created", file=sys.stderr)
 
         promise = Gst.Promise.new()
         self.webrtc.emit('set-local-description', offer, promise)
@@ -175,14 +188,24 @@ class WebRTCClient(Gtk.Box):
         promise = Gst.Promise.new_with_change_func(
             self.on_offer_created,
             element,
-            None
+            None,
         )
+        print("emit create-offer", file=sys.stderr)
         element.emit('create-offer', None, promise)
 
     def on_answer_create(self, promise, _, __):
-        promise.wait()
+        if promise.wait() != Gst.PromiseResult.REPLIED:
+            import sys
+            print("noreply", file=sys.stderr)
+            return
+
         reply = promise.get_reply()
-        answer = reply['answer']
+        if reply is None:
+            import sys
+            print("none reply", file=sys.stderr)
+            return
+
+        answer = reply.get_field('answer')
 
         promise = Gst.Promise.new()
         self.webrtc.emit('set-local-description', answer, promise)
@@ -195,8 +218,9 @@ class WebRTCClient(Gtk.Box):
         promise = Gst.Promise.new_with_change_func(
             self.on_answer_create,
             self.webrtc,
-            None
+            None,
         )
+        print("emit create-answer", file=sys.stderr)
         self.webrtc.emit('create-answer', None, promise)
 
     def send_ice_candidate_message(self, _, mlineindex, candidate):
@@ -217,6 +241,8 @@ class WebRTCClient(Gtk.Box):
         name = s.get_name()
 
         if name.startswith('video'):
+            import sys
+            print("video", file=sys.stderr)
             q = Gst.ElementFactory.make('queue')
             conv = Gst.ElementFactory.make('videoconvert')
 
@@ -228,6 +254,8 @@ class WebRTCClient(Gtk.Box):
             conv.link(self.sink)
 
         elif name.startswith('audio'):
+            import sys
+            print("audio", file=sys.stderr)
             q = Gst.ElementFactory.make('queue')
             conv = Gst.ElementFactory.make('audioconvert')
             resample = Gst.ElementFactory.make('audioresample')
@@ -264,6 +292,8 @@ class WebRTCClient(Gtk.Box):
             message = await self.signaling.receive()
 
             if isinstance(message, GstWebRTC.WebRTCSessionDescription):
+                import sys
+                print('remote desc', file=sys.stderr)
                 promise = Gst.Promise.new()
                 self.webrtc.emit(
                     'set-remote-description',
@@ -321,10 +351,10 @@ if __name__=='__main__':
 
     hangup = Gtk.Button.new_from_icon_name("call-stop", 6)
     microphone = Gtk.Button.new_from_icon_name("audio-input-microphone", 6)
-    cammera = Gtk.Button.new_from_icon_name("camera-web", 6)
+    camera = Gtk.Button.new_from_icon_name("camera-web", 6)
 
     buttonbox = Gtk.HBox()
-    buttonbox.add(cammera)
+    buttonbox.add(camera)
     buttonbox.add(microphone)
     buttonbox.add(hangup)
 

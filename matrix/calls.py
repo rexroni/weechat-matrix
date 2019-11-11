@@ -46,10 +46,12 @@ def webrtc_cb(data, command, return_code, out, err):
 
     if return_code == W.WEECHAT_HOOK_PROCESS_ERROR:
         W.prnt("", "Error with command '%s'" % command)
-        return W.WEECHAT_RC_OK
+
+    if return_code >= 0:
+        W.prnt("", "command exited with '%d'" % return_code)
 
     if err != "":
-        W.prnt("", "Webrtc log: '%s'" % err.strip())
+        W.prnt("", '\n'.join(["Webrtc log: '%s'"%(e) for e in err.strip().split('\n')]))
 
     if out != "":
         call.buffer += out
@@ -82,7 +84,7 @@ class CallProcess(object):
 
     def __attrs_post_init__(self):
         self.hook = W.hook_process_hashtable(
-            "matrix_webrtc",
+            "matrix_webrtc_gst",
             {
                 "buffer_flush": "1",
                 "stdin": "true",
