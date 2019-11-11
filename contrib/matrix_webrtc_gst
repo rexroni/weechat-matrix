@@ -130,6 +130,43 @@ class StinStdoutSignaling:
         self._write_pipe.write(object_to_string(obj) + "\n")
 
 
+class PromiseError(Exception):
+    pass
+
+
+def get_promise_reply(promise):
+    """
+    Raise an error if the promise is broken, otherwise return the reply.
+    """
+    if promise.wait() != Gst.PromiseResult.REPLIED:
+        raise PromiseError("promise not in REPLIED state")
+
+    return promise.get_reply()
+
+
+def printonly_promise(msg):
+    """
+    Return a promise which only prints a message upon completion
+    """
+
+    def _done_func(promise, _, __):
+        _ = get_promise_reply(promise)
+        print(msg, file=sys.stderr)
+
+    return Gst.Promise.new_with_change_func(_done_func, None, None)
+
+
+def printonly_sighandler(msg):
+    """
+    Return a closure that just prints a message when a signal is received.
+    """
+
+    def _sighandler_func(*_, **__):
+        print(msg, file=sys.stderr)
+
+    return _sighandler_func
+
+
 class WebRTCClient(Gtk.Box):
     def __init__(self, role):
         super().__init__()
@@ -140,11 +177,24 @@ class WebRTCClient(Gtk.Box):
         self.pipe = Gst.parse_launch(PIPELINE_DESC)
 
         self.webrtc = self.pipe.get_by_name('sendrecv')
-        import sys
-        print('webrtc of type', type(self.webrtc), file=sys.stderr)
-        self.webrtc.connect('on-negotiation-needed', self.on_negotiation_needed)
+
+        # When role==answer, this event seems to come in after local_description
+        # is set, and then it will create an offer, which seems wrong.  So we
+        # will disable it entirely for now:
+        # self.webrtc.connect('on-negotiation-needed', self.on_negotiation_needed)
+
         self.webrtc.connect('on-ice-candidate', self.send_ice_candidate_message)
         self.webrtc.connect('pad-added', self.on_incoming_stream)
+
+        # some debug hooks to try to figure out what we are missing:
+        for signal in [
+            'on-negotiation-needed',
+            'on-data-channel',
+            'on-new-transceiver',
+        ]:
+            self.webrtc.connect(
+                signal, lambda *_: print('ignoring', signal, file=sys.stderr)
+            )
 
         self.bin = Gst.parse_bin_from_description("videotestsrc", True)
         self.connect('realize', self._on_realize)
@@ -157,59 +207,36 @@ class WebRTCClient(Gtk.Box):
         gtksink.props.widget.show()
         self.sink = gtksink
 
+    def on_offer_created(self, promise, _, __):
+        reply = get_promise_reply(promise)
+        offer = reply.get_value('offer')
+        print("offer created", file=sys.stderr)
 
-    def send_sdp_offer(self, offer):
+        promise = printonly_promise("local_description_set (after offer)")
+        print("emit set-local-description", file=sys.stderr)
+        self.webrtc.emit('set-local-description', offer, promise)
+
         loop = asyncio.new_event_loop()
         loop.run_until_complete(self.signaling.send(offer))
 
-    def on_offer_created(self, promise, _, __):
-        if promise.wait() != Gst.PromiseResult.REPLIED:
-            import sys
-            print("offer_created no reply", file=sys.stderr)
-            return
-
-        reply = promise.get_reply()
-        if reply is None:
-            import sys
-            print("offer_created none reply", file=sys.stderr)
-            return
-
-        offer = reply.get_value('offer')
-        import sys
-        print("offer created", file=sys.stderr)
-
-        promise = Gst.Promise.new()
-        self.webrtc.emit('set-local-description', offer, promise)
-
-        promise.interrupt()
-        self.send_sdp_offer(offer)
-
-    def on_negotiation_needed(self, element):
+    def on_negotiation_needed(self, _):
+        print('on_negotiation_needed', file=sys.stderr)
         promise = Gst.Promise.new_with_change_func(
             self.on_offer_created,
-            element,
+            None,
             None,
         )
         print("emit create-offer", file=sys.stderr)
-        element.emit('create-offer', None, promise)
+        self.webrtc.emit('create-offer', None, promise)
 
     def on_answer_create(self, promise, _, __):
-        if promise.wait() != Gst.PromiseResult.REPLIED:
-            import sys
-            print("noreply", file=sys.stderr)
-            return
+        print("on_answer_create", file=sys.stderr)
+        reply = get_promise_reply(promise)
+        answer = reply['answer']
 
-        reply = promise.get_reply()
-        if reply is None:
-            import sys
-            print("none reply", file=sys.stderr)
-            return
-
-        answer = reply.get_field('answer')
-
-        promise = Gst.Promise.new()
+        promise = printonly_promise("local_description_set (after answer)")
+        print("emit set-local-description", file=sys.stderr)
         self.webrtc.emit('set-local-description', answer, promise)
-        promise.interrupt()
 
         loop = asyncio.new_event_loop()
         loop.run_until_complete(self.signaling.send(answer))
@@ -217,18 +244,29 @@ class WebRTCClient(Gtk.Box):
     def send_answer(self):
         promise = Gst.Promise.new_with_change_func(
             self.on_answer_create,
-            self.webrtc,
+            None,
             None,
         )
         print("emit create-answer", file=sys.stderr)
         self.webrtc.emit('create-answer', None, promise)
 
+    def on_remote_description_set(self, promise, message, __):
+        _ = get_promise_reply(promise)
+        print("on_remote_description_set", file=sys.stderr)
+
+        if message.type == GstWebRTC.WebRTCSDPType.OFFER:
+            self.send_answer()
+
     def send_ice_candidate_message(self, _, mlineindex, candidate):
+        # this is just noise
+        # print("on_ice_candidate", file=sys.stderr)
         candidate = IceCandidate(candidate, mlineindex)
         loop = asyncio.new_event_loop()
         loop.run_until_complete(self.signaling.send(candidate))
 
     def on_incoming_decodebin_stream(self, _, pad):
+        print("on_incoming_decodebin_stream", file=sys.stderr)
+
         if not pad.has_current_caps():
             return
 
@@ -241,7 +279,6 @@ class WebRTCClient(Gtk.Box):
         name = s.get_name()
 
         if name.startswith('video'):
-            import sys
             print("video", file=sys.stderr)
             q = Gst.ElementFactory.make('queue')
             conv = Gst.ElementFactory.make('videoconvert')
@@ -254,7 +291,6 @@ class WebRTCClient(Gtk.Box):
             conv.link(self.sink)
 
         elif name.startswith('audio'):
-            import sys
             print("audio", file=sys.stderr)
             q = Gst.ElementFactory.make('queue')
             conv = Gst.ElementFactory.make('audioconvert')
@@ -270,6 +306,7 @@ class WebRTCClient(Gtk.Box):
             resample.link(sink)
 
     def on_incoming_stream(self, _, pad):
+        print('on_incoming_stream', file=sys.stderr)
         if pad.direction != Gst.PadDirection.SRC:
             return
 
@@ -284,7 +321,6 @@ class WebRTCClient(Gtk.Box):
         self.pipe.set_state(Gst.State.PLAYING)
 
     async def loop(self):
-        print(self.role)
         if self.role == "offer":
             self.start_pipeline()
 
@@ -292,26 +328,30 @@ class WebRTCClient(Gtk.Box):
             message = await self.signaling.receive()
 
             if isinstance(message, GstWebRTC.WebRTCSessionDescription):
-                import sys
-                print('remote desc', file=sys.stderr)
-                promise = Gst.Promise.new()
+                if message.type == GstWebRTC.WebRTCSDPType.OFFER:
+                    self.start_pipeline()
+
+                promise = Gst.Promise.new_with_change_func(
+                    self.on_remote_description_set,
+                    message,
+                    None,
+                )
+                print("emit set-remote-description", file=sys.stderr)
                 self.webrtc.emit(
                     'set-remote-description',
                     message,
-                    promise
+                    promise,
                 )
-                promise.interrupt()
-
-                if message.type == GstWebRTC.WebRTCSDPType.OFFER:
-                    self.start_pipeline()
-                    self.send_answer()
 
             elif isinstance(message, IceCandidate):
                 self.webrtc.emit(
                     'add-ice-candidate',
                     message.sdpMLineIndex,
-                    message.candidate
+                    message.candidate,
                 )
+
+            else:
+                print('unknown message', file=sys.stderr)
 
         return 0
 
@@ -323,7 +363,7 @@ def check_plugins():
         filter(lambda p: Gst.Registry.get().find_plugin(p) is None, needed)
     )
     if len(missing):
-        print('Missing gstreamer plugins:', missing)
+        print('Missing gstreamer plugins:', missing, file=sys.stderr)
         return False
     return True
 

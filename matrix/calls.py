@@ -65,7 +65,7 @@ def webrtc_cb(data, command, return_code, out, err):
                 call.buffer += m
                 continue
 
-            print(message)
+            # print(message)
             call.handle_child_message(message)
 
     return W.WEECHAT_RC_OK
@@ -95,7 +95,7 @@ class CallProcess(object):
             str(self.call_id)
         )
 
-        print("Sending offer to child")
+        print("-------------------------------------------------")
         self.send(json.dumps(self.offer))
 
     def send_answer(self, answer):
@@ -125,6 +125,6 @@ class CallProcess(object):
         W.hook_set(self.hook, "stdin", message)
 
     def add_candidate(self, candidate):
-        print("Sending candidate to child")
+        # print("Sending candidate to child")
         candidate["type"] = "candidate"
         self.send(json.dumps(candidate))
