@@ -249,7 +249,7 @@ class WebRTCClient(Gtk.Box):
         self.sink = None
 
     def _on_realize(self, widget):
-        print("on realize")
+        print("on realize", file=sys.stderr)
         factory = self.pipe.get_factory()
         gtksink = factory.make('gtksink')
         self.pack_start(gtksink.props.widget, True, True, 0)
@@ -288,7 +288,7 @@ class WebRTCClient(Gtk.Box):
     def on_answer_create(self, promise, _, __):
         print("on_answer_create", file=sys.stderr)
         reply = get_promise_reply(promise)
-        answer = reply['answer']
+        answer = reply.get_value("answer")
 
         # print state before setting local description
         print_webrtc_state(self.webrtc)
@@ -334,7 +334,7 @@ class WebRTCClient(Gtk.Box):
         if not caps:
             return
 
-        s = caps[0]
+        s = caps.get_structure(0)
         name = s.get_name()
 
         if name.startswith('video'):

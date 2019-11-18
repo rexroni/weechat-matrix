@@ -59,9 +59,12 @@ def webrtc_cb(data, command, return_code, out, err):
         call.buffer = ""
 
         for m in messages:
+            if not len(m):
+                continue
             try:
                 message = json.loads(m)
             except (ValueError, TypeError):
+                print("bad message", m)
                 call.buffer += m
                 continue
 
@@ -115,6 +118,11 @@ class CallProcess(object):
     def handle_child_message(self, message):
         if message["type"] == "answer":
             self.send_answer(message)
+        elif message["type"] == "candidate":
+            # ignore these for now, since we are only answering
+            pass
+        else:
+            raise ValueError("unhandled child message")
 
     def hangup(self):
         print("Hanging up")
