@@ -342,7 +342,9 @@ class WebRTCClient(Gtk.Box):
             q = Gst.ElementFactory.make('queue')
             conv = Gst.ElementFactory.make('videoconvert')
 
-            self.pipe.add(q, conv, self.sink)
+            self.pipe.add(q)
+            self.pipe.add(conv)
+            self.pipe.add(self.sink)
             self.pipe.sync_children_states()
 
             pad.link(q.get_static_pad('sink'))
